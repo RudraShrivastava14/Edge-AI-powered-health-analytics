@@ -1,0 +1,28 @@
+%% Anomaly escalation sequence
+sequenceDiagram
+    autonumber
+    participant G as Edge Gateway
+    participant I as IoT Core
+    participant L1 as ingest_handler
+    participant L2 as anomaly_processor
+    participant DB as DynamoDB
+    participant L3 as alert_dispatcher
+    participant S as SNS
+    participant U as Caregiver
+
+    G->>G: 10s window → TFLite → reconstruction error e
+    alt e < tau_low
+        G->>I: summary only (~200 B)
+        I->>L1: rule invoke
+        L1->>DB: PutItem Telemetry
+    else e >= tau_high
+        G->>I: summary + full window (QoS 1)
+        I->>L1: rule invoke
+        L1->>DB: PutItem Telemetry
+        L1->>L2: async invoke
+        L2->>L2: confirmation model + rule cross-check
+        L2->>DB: PutItem Alert
+        L2->>L3: async invoke
+        L3->>S: Publish (deduped)
+        S->>U: email / SMS  (target < 5 s end to end)
+    end

@@ -1,0 +1,66 @@
+# ---- Secrets & credentials (NEVER commit) ----
+*.pem
+*.key
+*.crt
+*.p12
+edge/config/certs/
+.env
+.env.*
+!.env.example
+infrastructure/.outputs*.json
+aws-exports.js
+
+# ---- Datasets & model weights (large / licence-restricted) ----
+dataset/raw/
+dataset/processed/
+ai-models/data/
+*.h5
+*.keras
+*.ckpt
+*.pth
+*.npz
+*.npy
+!ai-models/models/edge/*.tflite
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Node / frontend ----
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+yarn-error.log*
+
+# ---- AWS SAM / CloudFormation ----
+.aws-sam/
+samconfig.toml
+packaged.yaml
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+
+# ---- Edge runtime state ----
+edge/*.sqlite
+edge/*.db
+edge/buffer/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+frontend/dist/
+frontend/node_modules/

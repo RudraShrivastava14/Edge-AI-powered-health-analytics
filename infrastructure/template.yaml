@@ -1,0 +1,453 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Cloud-Based Wearable Health Analytics Platform (edge-cloud split intelligence).
+  Fully serverless: IoT Core -> Lambda -> DynamoDB/S3 -> SNS, HTTP API + Cognito, S3/CloudFront SPA.
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Email address subscribed to the alerts SNS topic (must confirm the subscription email). Empty = no subscription.
+  EnableCloudFront:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: New AWS accounts sometimes cannot create CloudFront distributions until verified; set false to skip.
+
+Conditions:
+  UseCloudFront: !Equals [!Ref EnableCloudFront, "true"]
+  NoCloudFront: !Equals [!Ref EnableCloudFront, "false"]
+  HasEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 15
+    Tracing: Active
+    Environment:
+      Variables:
+        TELEMETRY_TABLE: !Ref TelemetryTable
+        ALERTS_TABLE: !Ref AlertsTable
+        DEVICES_TABLE: !Ref DevicesTable
+        RAW_BUCKET: !Ref RawBucket
+        ENV: !Ref Env
+        TELEMETRY_TTL_DAYS: "30"
+
+Resources:
+  # ------------------------------------------------------------------ storage
+  TelemetryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub hh-${Env}-telemetry
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: deviceId, AttributeType: S }
+        - { AttributeName: ts, AttributeType: N }
+      KeySchema:
+        - { AttributeName: deviceId, KeyType: HASH }
+        - { AttributeName: ts, KeyType: RANGE }
+      TimeToLiveSpecification: { AttributeName: expiresAt, Enabled: true }
+      SSESpecification: { SSEEnabled: true }
+
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub hh-${Env}-alerts
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: alertId, AttributeType: S }
+        - { AttributeName: deviceId, AttributeType: S }
+        - { AttributeName: status, AttributeType: S }
+        - { AttributeName: ts, AttributeType: N }
+      KeySchema:
+        - { AttributeName: alertId, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: byDevice
+          KeySchema:
+            - { AttributeName: deviceId, KeyType: HASH }
+            - { AttributeName: ts, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: byStatus
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: ts, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      SSESpecification: { SSEEnabled: true }
+
+  DevicesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub hh-${Env}-devices
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: deviceId, AttributeType: S }
+      KeySchema:
+        - { AttributeName: deviceId, KeyType: HASH }
+      SSESpecification: { SSEEnabled: true }
+
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub hh-${Env}-raw-${AWS::AccountId}-${AWS::Region}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      LifecycleConfiguration:
+        Rules:
+          - Id: raw-windows-tiering
+            Status: Enabled
+            Prefix: raw-windows/
+            Transitions:
+              - { StorageClass: STANDARD_IA, TransitionInDays: 30 }
+            ExpirationInDays: 90
+          - Id: quarantine-expiry
+            Status: Enabled
+            Prefix: quarantine/
+            ExpirationInDays: 30
+
+  # ------------------------------------------------------------------ messaging
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub hh-${Env}-alerts
+      Subscription: !If
+        - HasEmail
+        - [{ Protocol: email, Endpoint: !Ref AlertEmail }]
+        - !Ref AWS::NoValue
+
+  FailureQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub hh-${Env}-failed-invocations
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  # ------------------------------------------------------------------ compute
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub hh-${Env}-ingest-handler
+      CodeUri: ../backend/lambdas/ingest_handler/
+      Handler: app.handler
+      Environment:
+        Variables:
+          ANOMALY_FUNCTION: !Sub hh-${Env}-anomaly-processor
+      Policies:
+        - DynamoDBWritePolicy: { TableName: !Ref TelemetryTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref DevicesTable }
+        - S3WritePolicy: { BucketName: !Ref RawBucket }
+        - LambdaInvokePolicy: { FunctionName: !Sub "hh-${Env}-anomaly-processor" }
+      Events:
+        TelemetryRule:
+          Type: IoTRule
+          Properties:
+            AwsIotSqlVersion: "2016-03-23"
+            Sql: "SELECT *, topic(3) AS topicDeviceId FROM 'hh/v1/+/telemetry'"
+
+  IngestLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub "/aws/lambda/${IngestFunction}", RetentionInDays: 7 }
+
+  AnomalyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub hh-${Env}-anomaly-processor
+      CodeUri: ../backend/lambdas/anomaly_processor/
+      Handler: app.handler
+      MemorySize: 512
+      Environment:
+        Variables:
+          ALERT_FUNCTION: !Sub hh-${Env}-alert-dispatcher
+      Policies:
+        - S3ReadPolicy: { BucketName: !Ref RawBucket }
+        - DynamoDBCrudPolicy: { TableName: !Ref AlertsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref TelemetryTable }
+        - LambdaInvokePolicy: { FunctionName: !Sub "hh-${Env}-alert-dispatcher" }
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        DestinationConfig:
+          OnFailure: { Type: SQS, Destination: !GetAtt FailureQueue.Arn }
+
+  AnomalyLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub "/aws/lambda/${AnomalyFunction}", RetentionInDays: 7 }
+
+  AlertFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub hh-${Env}-alert-dispatcher
+      CodeUri: ../backend/lambdas/alert_dispatcher/
+      Handler: app.handler
+      Environment:
+        Variables:
+          ALERTS_TOPIC_ARN: !Ref AlertsTopic
+          DEBOUNCE_SECONDS: "300"
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref AlertsTable }
+        - SNSPublishMessagePolicy: { TopicName: !GetAtt AlertsTopic.TopicName }
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        DestinationConfig:
+          OnFailure: { Type: SQS, Destination: !GetAtt FailureQueue.Arn }
+
+  AlertLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub "/aws/lambda/${AlertFunction}", RetentionInDays: 7 }
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub hh-${Env}-api-handler
+      CodeUri: ../backend/lambdas/api_handler/
+      Handler: app.handler
+      Policies:
+        - DynamoDBReadPolicy: { TableName: !Ref TelemetryTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref AlertsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref DevicesTable }
+      Events:
+        Health:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/health", Method: GET, Auth: { Authorizer: NONE } }
+        Devices:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/devices", Method: GET }
+        RegisterDevice:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/devices", Method: POST }
+        Vitals:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/devices/{deviceId}/vitals", Method: GET }
+        Latest:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/devices/{deviceId}/vitals/latest", Method: GET }
+        Stats:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/devices/{deviceId}/stats", Method: GET }
+        Alerts:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/alerts", Method: GET }
+        Ack:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: "/v1/alerts/{alertId}/ack", Method: POST }
+
+  ApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: !Sub "/aws/lambda/${ApiFunction}", RetentionInDays: 7 }
+
+  # ------------------------------------------------------------------ identity + API
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub hh-${Env}-users
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      AdminCreateUserConfig: { AllowAdminCreateUserOnly: true }
+      Policies:
+        PasswordPolicy: { MinimumLength: 10, RequireLowercase: true, RequireUppercase: true, RequireNumbers: true, RequireSymbols: false }
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub hh-${Env}-dashboard
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows: [ALLOW_USER_SRP_AUTH, ALLOW_USER_PASSWORD_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 7
+      TokenValidityUnits: { AccessToken: hours, IdToken: hours, RefreshToken: days }
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowHeaders: [authorization, content-type]
+        AllowMethods: [GET, POST, OPTIONS]
+        MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 50
+        ThrottlingRateLimit: 20
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              audience: [!Ref UserPoolClient]
+
+  # ------------------------------------------------------------------ IoT device policy
+  DevicePolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: !Sub hh-${Env}-device-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: iot:Connect
+            Resource: !Sub "arn:aws:iot:${AWS::Region}:${AWS::AccountId}:client/${!iot:Connection.Thing.ThingName}"
+          - Effect: Allow
+            Action: iot:Publish
+            Resource:
+              - !Sub "arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/hh/v1/${!iot:Connection.Thing.ThingName}/telemetry"
+              - !Sub "arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/hh/v1/${!iot:Connection.Thing.ThingName}/status"
+          - Effect: Allow
+            Action: iot:Subscribe
+            Resource: !Sub "arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topicfilter/hh/v1/${!iot:Connection.Thing.ThingName}/config"
+          - Effect: Allow
+            Action: iot:Receive
+            Resource: !Sub "arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/hh/v1/${!iot:Connection.Thing.ThingName}/config"
+
+  # ------------------------------------------------------------------ web hosting
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub hh-${Env}-web-${AWS::AccountId}-${AWS::Region}
+      # With CloudFront the bucket stays private (OAC). Without it (new, unverified accounts) the
+      # static build is served by S3 website hosting: it contains only public JS/CSS and
+      # non-secret IDs; all data stays behind the Cognito-protected API.
+      PublicAccessBlockConfiguration: !If
+        - UseCloudFront
+        - { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+        - { BlockPublicAcls: true, BlockPublicPolicy: false, IgnorePublicAcls: true, RestrictPublicBuckets: false }
+      WebsiteConfiguration: !If
+        - UseCloudFront
+        - !Ref AWS::NoValue
+        - { IndexDocument: index.html, ErrorDocument: index.html }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  WebOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: UseCloudFront
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub hh-${Env}-web-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: UseCloudFront
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub hh-${Env} dashboard
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_200
+        HttpVersion: http2
+        Origins:
+          - Id: web
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !Ref WebOAC
+            S3OriginConfig: { OriginAccessIdentity: "" }
+        DefaultCacheBehavior:
+          TargetOriginId: web
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # Managed-CachingOptimized
+          Compress: true
+        CustomErrorResponses:
+          - { ErrorCode: 403, ResponseCode: 200, ResponsePagePath: /index.html }
+          - { ErrorCode: 404, ResponseCode: 200, ResponsePagePath: /index.html }
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: UseCloudFront
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}
+
+  WebsitePublicReadPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: NoCloudFront
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+
+  # ------------------------------------------------------------------ monitoring
+  IngestErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub hh-${Env}-ingest-errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref IngestFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+
+  FailedInvocationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub hh-${Env}-failed-invocations
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{ Name: QueueName, Value: !GetAtt FailureQueue.QueueName }]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertsTopic]
+
+Outputs:
+  ApiEndpoint:
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  RawBucketName:
+    Value: !Ref RawBucket
+  WebBucketName:
+    Value: !Ref WebBucket
+  DashboardUrl:
+    Value: !If
+      - UseCloudFront
+      - !Sub https://${WebDistribution.DomainName}
+      - !Sub https://${WebBucket}.s3.${AWS::Region}.amazonaws.com/index.html
+  DistributionId:
+    Condition: UseCloudFront
+    Value: !Ref WebDistribution
+  DevicePolicyName:
+    Value: !Ref DevicePolicy
+  AlertsTopicArn:
+    Value: !Ref AlertsTopic

@@ -1,0 +1,10 @@
+# Model development (dev machine / Colab / SageMaker Studio Lab — not the edge device)
+numpy>=1.26,<2.1
+scipy>=1.11
+pandas>=2.1
+scikit-learn>=1.4
+matplotlib>=3.8
+tensorflow>=2.15,<2.17     # includes the TFLite converter
+wfdb>=4.1                  # PhysioNet record reader (MIT-BIH, PTB-XL)
+tqdm>=4.66
+jupyter>=1.0

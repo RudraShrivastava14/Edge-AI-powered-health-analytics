@@ -1,0 +1,29 @@
+# Copy to device.yaml and fill in. device.yaml is gitignored.
+device:
+  id: demo-001
+  label: "Ward A - Bed 3"
+  firmware: "0.1.0"
+
+iot:
+  endpoint: "xxxxxxxxxx-ats.iot.ap-south-1.amazonaws.com"
+  topic_prefix: "hh/v1"
+  cert_dir: "config/certs/demo-001"
+  keep_alive_secs: 30
+
+sampling:
+  rate_hz: 125
+  window_seconds: 10
+  overlap: 0.5
+
+inference:
+  model_path: "edge_inference/models/autoencoder_int8.tflite"
+  model_version: "ae-int8-0.0.0-stub"
+  thresholds:
+    tau_low: 0.030
+    tau_high: 0.075
+    activity_scale: { rest: 1.0, walk: 1.4, run: 2.0 }
+
+buffer:
+  path: "buffer/telemetry.sqlite"
+  max_items: 8640          # ~24 h of 10 s windows
+  replay_batch: 50

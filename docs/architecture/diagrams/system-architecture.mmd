@@ -1,0 +1,40 @@
+%% System architecture — master diagram
+%% Render: npx @mermaid-js/mermaid-cli -i system-architecture.mmd -o system-architecture.png -s 3
+flowchart LR
+    subgraph EDGE["Edge Tier"]
+        W["Wearable Sensors<br/>ECG · HR · SpO2 · Temp · IMU"]
+        G["Edge Gateway<br/>filter → window → TFLite INT8<br/>→ uplink policy → buffer"]
+        W -->|BLE / serial| G
+    end
+
+    subgraph AWS["AWS Cloud Tier (Free Tier, serverless)"]
+        IOT["IoT Core<br/>MQTT + Rules Engine"]
+        L1["lambda: ingest_handler"]
+        L2["lambda: anomaly_processor"]
+        L3["lambda: alert_dispatcher"]
+        L4["lambda: api_handler"]
+        DDB[("DynamoDB<br/>Telemetry / Alerts / Devices")]
+        S3[("S3<br/>raw windows · models · web")]
+        SNS["SNS"]
+        API["API Gateway HTTP API"]
+        COG["Cognito"]
+        CW["CloudWatch"]
+    end
+
+    subgraph UI["Presentation Tier"]
+        SPA["React Dashboard<br/>S3 + CloudFront"]
+        USR["Caregiver / Clinician"]
+    end
+
+    G -->|MQTT/TLS| IOT --> L1
+    L1 --> DDB
+    L1 --> S3
+    L1 -->|suspect / critical| L2 --> DDB
+    L2 --> L3 --> SNS --> USR
+    SPA --> API --> L4 --> DDB
+    SPA -.auth.-> COG -.authorizer.-> API
+    USR --> SPA
+    L1 -.-> CW
+    L2 -.-> CW
+    L3 -.-> CW
+    L4 -.-> CW

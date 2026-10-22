@@ -1,0 +1,13 @@
+%% Deployment / CI-CD view
+flowchart LR
+    DEV["Developer<br/>SAM CLI"] --> CFN
+    GH["GitHub Actions<br/>OIDC role assumption"] --> CFN
+    subgraph REGION["AWS Region: ap-south-1"]
+        CFN["CloudFormation stack<br/>health-analytics-{env}"]
+        CFN --> R1["IoT things + policies + rules"]
+        CFN --> R2["4x Lambda + shared layer"]
+        CFN --> R3["3x DynamoDB tables"]
+        CFN --> R4["2x S3 buckets + CloudFront"]
+        CFN --> R5["API Gateway + Cognito"]
+        CFN --> R6["SNS + SQS DLQ + CloudWatch"]
+    end

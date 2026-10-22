@@ -1,0 +1,8 @@
+# Edge tier dependencies
+numpy>=1.26,<2.1
+scipy>=1.11              # bandpass filtering, resampling
+awsiotsdk>=1.21          # MQTT over mutual TLS to AWS IoT Core
+paho-mqtt>=2.0           # fallback broker client / local testing
+
+# Install on the device only (skip on x86 dev machines that use full TF):
+# tflite-runtime>=2.14

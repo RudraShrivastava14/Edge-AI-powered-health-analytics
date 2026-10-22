@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://health-analytics.example/schemas/telemetry.v1.json",
+  "title": "hh.telemetry.v1",
+  "description": "Telemetry payload published by an edge gateway to hh/v1/{deviceId}/telemetry. Machine-readable form of docs/architecture/API_CONTRACT.md.",
+  "type": "object",
+  "required": ["schema", "deviceId", "ts", "seq", "vitals", "edge"],
+  "additionalProperties": true,
+  "properties": {
+    "schema": { "const": "hh.telemetry.v1" },
+    "deviceId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{3,64}$",
+      "description": "Opaque identifier. MUST NOT contain personally identifying information."
+    },
+    "ts": { "type": "integer", "minimum": 1600000000000, "description": "Epoch milliseconds, UTC" },
+    "seq": { "type": "integer", "minimum": 0, "description": "Monotonic per-device counter, for gap detection" },
+    "window": {
+      "type": "object",
+      "properties": {
+        "durationMs": { "type": "integer", "minimum": 1000, "maximum": 60000 },
+        "sampleRateHz": { "type": "integer", "minimum": 25, "maximum": 1000 }
+      }
+    },
+    "vitals": {
+      "type": "object",
+      "required": ["hr"],
+      "properties": {
+        "hr": {
+          "type": "object",
+          "required": ["mean"],
+          "properties": {
+            "mean": { "type": "number", "minimum": 20, "maximum": 250 },
+            "min":  { "type": "number", "minimum": 20, "maximum": 250 },
+            "max":  { "type": "number", "minimum": 20, "maximum": 250 },
+            "sdnn": { "type": "number", "minimum": 0, "maximum": 1000, "description": "SD of RR intervals, ms" }
+          }
+        },
+        "spo2": {
+          "type": "object",
+          "properties": {
+            "mean": { "type": "number", "minimum": 50, "maximum": 100 },
+            "min":  { "type": "number", "minimum": 50, "maximum": 100 }
+          }
+        },
+        "tempC": {
+          "type": "object",
+          "properties": {
+            "mean": { "type": "number", "minimum": 25, "maximum": 45 }
+          }
+        },
+        "activity": { "enum": ["rest", "walk", "run", "unknown"] }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["flag", "reconError", "modelVersion"],
+      "properties": {
+        "modelVersion": { "type": "string", "maxLength": 64 },
+        "reconError": { "type": "number", "minimum": 0 },
+        "flag": { "enum": ["normal", "suspect", "critical"] },
+        "inferenceMs": { "type": "number", "minimum": 0 }
+      }
+    },
+    "raw": {
+      "type": "object",
+      "description": "Present only when edge.flag != 'normal'.",
+      "required": ["encoding", "channels", "data"],
+      "properties": {
+        "encoding": { "enum": ["b64+gzip+float16", "b64+gzip+float32"] },
+        "channels": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "s3Hint": { "type": ["string", "null"], "description": "Set by ingest_handler after archival" },
+        "data": { "type": "string", "maxLength": 131072 }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "battery": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fwVersion": { "type": "string", "maxLength": 32 },
+        "bufferedReplay": { "type": "boolean", "description": "True if replayed from the offline buffer" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "edge": { "properties": { "flag": { "const": "normal" } } } } },
+      "then": { "not": { "required": ["raw"] } },
+      "$comment": "Normal windows must not carry a raw payload — that would defeat the bandwidth policy."
+    }
+  ]
+}

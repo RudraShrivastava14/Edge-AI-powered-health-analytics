@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+# No AWS credentials are used in this workflow. Deployment lives in deploy.yml and
+# authenticates via GitHub OIDC role assumption — never long-lived access keys.
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python — lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+          pip install -r edge/requirements.txt || true
+          pip install -r tests/requirements.txt || true
+
+      - name: Lint
+        run: ruff check edge backend ai-models tests --output-format=github
+        continue-on-error: true   # TODO: drop once the codebase is lint-clean
+
+      - name: Smoke-test the edge simulator
+        run: |
+          cd edge
+          python -m simulator.run --device-id ci-001 --profile mixed \
+            --dry-run --windows 25 --interval 0 --seed 7
+
+      - name: Unit + integration tests
+        run: |
+          if [ -n "$(find tests -name 'test_*.py' -print -quit)" ]; then
+            pytest tests/unit tests/integration -q --cov=backend --cov=edge
+          else
+            echo "No tests yet — skipping. Remove this branch once tests land (task B-8)."
+          fi
+
+  templates:
+    name: CloudFormation — validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Validate templates
+        run: |
+          shopt -s nullglob
+          files=(infrastructure/cloudformation/*.yaml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No templates yet — skipping (task I-2)."
+          else
+            cfn-lint "${files[@]}"
+          fi
+
+  frontend:
+    name: Frontend — build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          if [ -f frontend/package.json ]; then
+            cd frontend
+            npm ci
+            npm run build --if-present
+            npm run test --if-present
+          else
+            echo "Frontend not scaffolded yet — skipping (task F-1)."
+          fi
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docs:
+    name: Docs — link check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check relative links in Markdown
+        run: |
+          fail=0
+          while IFS= read -r -d '' md; do
+            dir=$(dirname "$md")
+            grep -oE '\]\(([^)#:]+)' "$md" | sed 's/^](//' | while read -r link; do
+              case "$link" in http*|mailto:*|"") continue ;; esac
+              target="$dir/$link"
+              [ -e "$target" ] || echo "BROKEN: $md -> $link"
+            done
+          done < <(find . -name '*.md' -not -path './node_modules/*' -print0) | tee /tmp/broken.txt
+          if [ -s /tmp/broken.txt ]; then
+            echo "Broken relative links found (informational)."
+          fi
