@@ -33,8 +33,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Wearable telemetry simulator")
     p.add_argument("--device-id", required=True, help="opaque device identifier")
     p.add_argument("--profile", default="mixed",
-                   choices=[*sorted(PROFILES), "mixed"],
-                   help="physiological profile to simulate")
+                   help="synthetic: healthy|tachycardia|bradycardia|arrhythmia|hypoxia|mixed; "
+                        "real ECG replay: mitbih-100 | mitbih-119 | mitbih-208 | mitbih-233")
     p.add_argument("--windows", type=int, default=None,
                    help="number of 10 s windows (default: run forever)")
     p.add_argument("--interval", type=float, default=10.0,
@@ -49,7 +49,13 @@ def parse_args(argv=None) -> argparse.Namespace:
                    help="mtls: X.509 device certificate (real devices); wss: MQTT over WebSocket "
                         "signed with the caller's IAM credentials (development, behind proxies)")
     p.add_argument("--region", default="ap-south-1")
+    p.add_argument("--port", type=int, default=443,
+                   help="443 (ALPN) works on networks that block MQTT's usual 8883")
     p.add_argument("--verbose", "-v", action="store_true", help="print each payload in full")
+    p.add_argument("--scorer", choices=["tiny", "autoencoder", "heuristic"], default="tiny",
+                   help="tiny: deployed edge model (edge/models/edge_tiny.onnx, 33 params); "
+                        "autoencoder: ECG autoencoder (ai-models/models/ecg_autoencoder.onnx); "
+                        "heuristic: the original placeholder formula")
     return p.parse_args(argv)
 
 
@@ -82,6 +88,7 @@ def make_publisher(args):
         pri_key_filepath=str(certs / "private.key"),
         ca_filepath=str(certs / "AmazonRootCA1.pem"),
         client_id=args.device_id,
+        port=args.port,
         clean_session=False,
         keep_alive_secs=30,
     )
@@ -103,6 +110,14 @@ def main(argv=None) -> int:
     publish = make_publisher(args)
     topic = f"{args.topic_prefix}/{args.device_id}/telemetry"
     thresholds = policy.Thresholds()
+    model = None
+    if args.scorer in ("tiny", "autoencoder"):
+        from edge_inference.model import OnnxScorer, TinyScorer
+        model = TinyScorer() if args.scorer == "tiny" else OnnxScorer()
+        print(f"edge model: {model.version} ({model.path.name}, {model.meta['parameters']:,} params, "
+              f"{model.path.stat().st_size:,} bytes)", flush=True)
+    else:
+        print("edge model: heuristic placeholder", flush=True)
 
     # Counters for bandwidth benchmark E5.
     sent_bytes = baseline_total = 0
@@ -114,10 +129,21 @@ def main(argv=None) -> int:
           f"{'(dry run)' if args.dry_run else ''}", flush=True)
 
     try:
-        for window in generate_stream(args.profile, n_windows=args.windows, seed=args.seed):
+        if args.profile.startswith("mitbih-"):
+            from simulator.replay import replay_stream
+            source = replay_stream(args.profile.split("-", 1)[1], n_windows=args.windows, seed=args.seed)
+        elif args.profile in PROFILES or args.profile == "mixed":
+            source = generate_stream(args.profile, n_windows=args.windows, seed=args.seed)
+        else:
+            sys.exit(f"unknown profile {args.profile!r}")
+        for window in source:
             seq += 1
-            recon_error, inference_ms = policy.score_window(window)
-            flag = policy.classify(recon_error, window.activity, thresholds)
+            if model:
+                recon_error, inference_ms = model.score(window)
+                flag = model.classify(recon_error, window)
+            else:
+                recon_error, inference_ms = policy.score_window(window)
+                flag = policy.classify(recon_error, window.activity, thresholds)
             payload = policy.build_payload(
                 device_id=args.device_id,
                 ts_ms=int(time.time() * 1000),
@@ -126,6 +152,7 @@ def main(argv=None) -> int:
                 recon_error=recon_error,
                 flag=flag,
                 inference_ms=inference_ms,
+                model_version=model.version if model else "heuristic-0.1.0",
             )
 
             size = policy.payload_bytes(payload)
@@ -136,9 +163,9 @@ def main(argv=None) -> int:
             publish(topic, payload, qos=1 if flag is policy.Flag.CRITICAL else 0)
 
             hr = payload["vitals"]["hr"]["mean"]
-            print(f"[{seq:>5}] {window.profile:<12} act={window.activity:<4} "
+            print(f"[{seq:>5}] {window.profile:<16} act={window.activity:<4} "
                   f"hr={hr:6.1f} spo2={window.spo2:5.1f} e={recon_error:.4f} "
-                  f"flag={flag.value:<8} {size:>6} B", flush=True)
+                  f"flag={flag.value:<8} {size:>6} B  {inference_ms:4.1f} ms", flush=True)
 
             if args.windows is None or seq < args.windows:
                 time.sleep(args.interval)

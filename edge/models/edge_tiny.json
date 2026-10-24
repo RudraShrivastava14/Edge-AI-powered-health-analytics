@@ -1,0 +1,61 @@
+{
+  "model": "edge_tiny",
+  "version": "edge-tiny-1.0.0",
+  "features": [
+    "hr_mean",
+    "hr_range",
+    "rr_cv",
+    "spo2",
+    "walking",
+    "running"
+  ],
+  "parameters": 33,
+  "onnx_bytes": 914,
+  "thresholds": {
+    "tau_low": 0.91,
+    "tau_high": 0.92
+  },
+  "training": {
+    "simulator_windows": 5400,
+    "mitbih_windows": 3226,
+    "mitbih_records": [
+      101,
+      108,
+      109,
+      112,
+      114,
+      115,
+      116,
+      118,
+      122,
+      124,
+      201,
+      203,
+      205,
+      207,
+      209,
+      215,
+      220,
+      230
+    ]
+  },
+  "test_metrics_at_tau_low": {
+    "simulator": {
+      "n": 1800,
+      "positives": 800,
+      "precision": 1.0,
+      "recall": 0.98125,
+      "f1": 0.9905362776025236,
+      "false_positive_rate": 0.0
+    },
+    "mitbih_DS2": {
+      "n": 3960,
+      "positives": 1465,
+      "precision": 0.7938331318016929,
+      "recall": 0.8962457337883959,
+      "f1": 0.8419365181147804,
+      "false_positive_rate": 0.13667334669338677
+    }
+  },
+  "deployment": "edge only - not uploaded to AWS"
+}

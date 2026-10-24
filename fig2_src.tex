@@ -1,0 +1,36 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Latin Modern Roman}
+\setmonofont{Latin Modern Mono}[Scale=0.92]
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\definecolor{ink}{gray}{0.10}
+\definecolor{boxline}{gray}{0.80}
+\definecolor{meta}{gray}{0.45}
+\begin{document}
+\color{ink}
+\begin{tikzpicture}[
+  every node/.style={font=\footnotesize},
+  stage/.style={draw=boxline,fill=white,rounded corners=1.5pt,align=center,inner sep=5pt,text width=27mm,minimum height=13mm},
+  owasp/.style={font=\scriptsize\itshape,color=meta,align=center},
+  flow/.style={-{Latex[length=2.2mm]},draw=ink,thick}
+]
+\node[stage] (s1) {\textbf{1. Access}\\\texttt{Host: localhost}\\reaches setup page};
+\node[stage,right=9mm of s1] (s2) {\textbf{2. Admin}\\re-run setup, create\\\texttt{Cluster Admin}};
+\node[stage,right=9mm of s2] (s3) {\textbf{3. Execute}\\AV path $\rightarrow$ script\\runs as \texttt{SYSTEM}};
+\node[stage,below=11mm of s3] (s4) {\textbf{4. Install}\\Zoho UEMS, Assist,\\AnyDesk};
+\node[stage,left=9mm of s4] (s5) {\textbf{5. Escalate}\\enumerate users,\\target Domain Admins};
+\node[stage,left=9mm of s5] (s6) {\textbf{6. Tunnel}\\Plink SSH reverse\\tunnel, RDP:3389};
+\draw[flow] (s1) -- (s2);
+\draw[flow] (s2) -- (s3);
+\draw[flow] (s3) -- (s4);
+\draw[flow] (s4) -- (s5);
+\draw[flow] (s5) -- (s6);
+\node[owasp,below=2pt of s1]{A01 Broken\\Access Control};
+\node[owasp,below=2pt of s2]{A01 / A06};
+\node[owasp,above=2pt of s3]{A06 Insecure\\Design};
+\node[owasp,above=2pt of s4]{A02 Misconfig.};
+\node[owasp,below=2pt of s5]{post-exploitation};
+\node[owasp,below=2pt of s6]{defense evasion};
+\end{tikzpicture}
+\end{document}

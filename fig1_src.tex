@@ -1,0 +1,36 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{fontspec}
+\setmainfont{Latin Modern Roman}
+\setmonofont{Latin Modern Mono}[Scale=0.92]
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric}
+\definecolor{ink}{gray}{0.10}
+\definecolor{boxline}{gray}{0.80}
+\definecolor{meta}{gray}{0.45}
+\begin{document}
+\color{ink}
+\begin{tikzpicture}[
+  node distance=6mm and 10mm,
+  every node/.style={font=\footnotesize},
+  box/.style={draw=boxline,fill=white,rounded corners=1pt,align=center,inner sep=4pt,minimum height=7mm},
+  dec/.style={draw=boxline,fill=white,diamond,aspect=2.2,align=center,inner sep=1pt},
+  grant/.style={draw=ink,thick,fill=white,rounded corners=1pt,align=center,inner sep=4pt},
+  deny/.style={draw=boxline,fill=white,rounded corners=1pt,align=center,inner sep=4pt},
+  flow/.style={-{Latex[length=2mm]},draw=ink}
+]
+\node[box] (req) {Incoming request to\\\texttt{AdminDatabase.aspx}};
+\node[dec, right=of req] (host) {\texttt{Url.Host}\\\texttt{== localhost}?};
+\node[grant, right=18mm of host] (grant) {\textbf{Access granted}\\(all other checks skipped)};
+\node[dec, below=9mm of host] (tip) {\texttt{TrustedHostIp}\\configured?};
+\node[deny, below=9mm of tip] (deny) {Redirect to\\\texttt{AccessDenied.aspx}};
+\node[dec, right=18mm of tip] (ipmatch) {client IP ==\\trusted IP?};
+\draw[flow] (req) -- (host);
+\draw[flow] (host) -- node[above,font=\scriptsize]{yes (spoofable)} (grant);
+\draw[flow] (host) -- node[right,font=\scriptsize]{no} (tip);
+\draw[flow] (tip) -- node[left,font=\scriptsize]{no} (deny);
+\draw[flow] (tip) -- node[above,font=\scriptsize]{yes} (ipmatch);
+\draw[flow] (ipmatch) -- node[right,font=\scriptsize]{no} (deny);
+\draw[flow] (ipmatch.east) -- ++(6mm,0) |- node[near start,right,font=\scriptsize]{yes} (grant.east);
+\node[font=\scriptsize\itshape,color=meta,above=1pt of grant]{attacker path};
+\end{tikzpicture}
+\end{document}

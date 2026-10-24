@@ -1,0 +1,73 @@
+{
+  "model": "cloud_beat_classifier",
+  "version": "beatcnn-1.0.0",
+  "classes": [
+    "N",
+    "S",
+    "V"
+  ],
+  "parameters": 50723,
+  "onnx_bytes": 204541,
+  "input": {
+    "beat": "[2, 96] at 125 Hz (36 before R), per-beat z-score; ch0 beat, ch1 median of +-8 neighbouring beats",
+    "rr": "pre-RR, post-RR, local median RR (9 beats), pre/local, post/pre"
+  },
+  "dataset": "MIT-BIH Arrhythmia Database (PhysioNet), MLII, 0.5-40 Hz, 125 Hz, AAMI classes",
+  "split": "inter-patient: train all DS1 patients, test DS2 patients (de Chazal 2004)",
+  "test_metrics": {
+    "confusion_matrix": [
+      [
+        41300,
+        551,
+        2388
+      ],
+      [
+        718,
+        310,
+        809
+      ],
+      [
+        265,
+        26,
+        3317
+      ]
+    ],
+    "per_class": {
+      "N": {
+        "n": 44239,
+        "sensitivity": 0.9335654060896494,
+        "ppv": 0.976751886100797
+      },
+      "S": {
+        "n": 1837,
+        "sensitivity": 0.16875340228633642,
+        "ppv": 0.34949267192784667
+      },
+      "V": {
+        "n": 3608,
+        "sensitivity": 0.9193458980044346,
+        "ppv": 0.5092109303039607
+      }
+    },
+    "accuracy": 0.9042548909105547,
+    "abnormal_vs_normal": {
+      "precision": 0.6028915011484934,
+      "recall": 0.8194674012855832,
+      "f1": 0.6946909543826872
+    }
+  },
+  "train_seconds": 98.2,
+  "window_decision": {
+    "rule": "confirm if any beat has P(S)+P(V) >= 0.9",
+    "beat_prob_threshold": 0.9,
+    "min_abnormal_beats": 1,
+    "test_DS2_windows": {
+      "n": 3960,
+      "abnormal": 1465,
+      "precision": 0.819,
+      "recall": 0.901,
+      "f1": 0.858,
+      "specificity": 0.883
+    }
+  }
+}

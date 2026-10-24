@@ -1,8 +1,8 @@
 """alert_dispatcher — de-duplicate, debounce and publish confirmed alerts to SNS.
 
 A sustained episode produces a confirmed alert every 10 seconds; a clinician needs one
-notification, not thirty. An alert is suppressed when the same device already notified the
-same alert class within DEBOUNCE_SECONDS. Every alert stays in the table either way, so the
+notification, not thirty. An alert is suppressed when the same device already sent a
+notification of equal or higher severity within DEBOUNCE_SECONDS. Every alert stays in the table either way, so the
 dashboard timeline is complete. End-to-end latency (edge timestamp -> SNS publish) is
 recorded on the alert for benchmarking.
 """
@@ -30,6 +30,8 @@ LABELS = {
     "bradycardia": "Bradycardia (low heart rate)",
     "desaturation": "SpO2 desaturation",
     "irregular_rhythm": "Irregular heart rhythm",
+    "ventricular_ectopy": "Ventricular ectopic beats (PVCs)",
+    "supraventricular_ectopy": "Supraventricular ectopic beats",
 }
 
 
@@ -38,10 +40,11 @@ def _recent_notified(alert: dict) -> bool:
     resp = ALERTS.query(
         IndexName="byDevice",
         KeyConditionExpression=Key("deviceId").eq(alert["deviceId"]) & Key("ts").between(since, int(alert["ts"])),
-        FilterExpression=Attr("class").eq(alert["class"]) & Attr("notified").eq(True)
-        & Attr("alertId").ne(alert["alertId"]),
+        FilterExpression=Attr("notified").eq(True) & Attr("alertId").ne(alert["alertId"]),
     )
-    return bool(resp.get("Items"))
+    rank = {"medium": 1, "high": 2}
+    # One email per device per episode; a new email only if the situation escalates.
+    return any(rank.get(i.get("severity"), 0) >= rank.get(alert.get("severity"), 0) for i in resp.get("Items", []))
 
 
 def handler(event, context):
@@ -67,7 +70,8 @@ def handler(event, context):
         f"Heart rate:  {alert.get('hr')} bpm (from ECG: {alert.get('hrEcg') or 'n/a'})",
         f"SpO2:        {alert.get('spo2')} %",
         f"Activity:    {alert.get('activity')}",
-        f"Edge flag:   {alert.get('edgeFlag')} (score {alert.get('edgeReconError')})",
+        f"Edge flag:   {alert.get('edgeFlag')} (edge model {alert.get('edgeModel')}, score {alert.get('edgeReconError')})",
+        f"Cloud model: {alert.get('cloudModel')} - {alert.get('beats')} beats classified {alert.get('beatCounts')}",
         "",
         f"Alert ID: {alert['alertId']}",
         "Open the dashboard to review the waveform and acknowledge.",

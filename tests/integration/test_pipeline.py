@@ -101,7 +101,7 @@ def test_critical_window_confirmed_alerted_and_debounced(aws):
         assert out["s3Key"].startswith("raw-windows/")
     code, body = _api(aws, "GET /v1/alerts", qs={"status": "open"})
     assert code == 200 and len(body["items"]) == 3
-    assert {a["class"] for a in body["items"]} == {"tachycardia"}
+    assert {a["class"] for a in body["items"]} <= {"tachycardia", "ventricular_ectopy", "supraventricular_ectopy"}
     notified = [a for a in body["items"] if a.get("notified")]
     assert len(notified) == 1, "debounce must collapse an episode into one notification"
     code, body = _api(aws, "POST /v1/alerts/{alertId}/ack", pp={"alertId": notified[0]["alertId"]},

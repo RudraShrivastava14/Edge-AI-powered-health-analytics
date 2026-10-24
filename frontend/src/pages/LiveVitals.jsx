@@ -52,7 +52,7 @@ export default function LiveVitals({ deviceId, pollMs }) {
         <Tile label="SpO₂" value={latest?.spo2?.toFixed(1)} unit="%" warn={latest?.spo2 < 92} />
         <Tile label="Skin temp" value={latest?.tempC?.toFixed(1)} unit="°C" sub={latest ? `activity: ${latest.activity}` : ""} />
         <Tile label="Edge verdict" value={latest ? f.toUpperCase() : "—"} color={FLAG_COLOR[f]}
-          sub={latest ? `score ${latest.reconError?.toFixed(3)}${latest.cloudVerdict ? ` · cloud: ${latest.cloudVerdict}` : ""}` : ""} />
+          sub={latest ? `${latest.modelVersion?.startsWith("edge-tiny") ? "P(abnormal)" : "score"} ${latest.reconError?.toFixed(3)} · ${latest.modelVersion || ""}${latest.cloudVerdict ? ` · cloud: ${latest.cloudVerdict}` : ""}` : ""} />
       </div>
 
       <div className="grid2">
@@ -78,7 +78,7 @@ export default function LiveVitals({ deviceId, pollMs }) {
           <ul className="alerts-mini">
             {alerts.map((a) => (
               <li key={a.alertId} className={`sev-${a.severity}`}>
-                <b>{a.class.replace("_", " ")}</b>
+                <b>{a.class.replaceAll("_", " ")}</b>
                 <span className="muted small">{fmtTime(a.ts)} · {a.status}{a.notified === false ? " · debounced" : ""}</span>
               </li>
             ))}
@@ -136,6 +136,7 @@ function VitalTip({ active, payload }) {
     <div className="tip">
       <b>{fmtTime(p.ts)}</b><br />HR {p.hr?.toFixed(1)} bpm · SpO₂ {p.spo2?.toFixed(1)}%<br />
       {p.activity} · <span style={{ color: FLAG_COLOR[p.flag] }}>{p.flag}</span>{p.cloudVerdict ? ` · cloud ${p.cloudVerdict}` : ""}
+      {p.cloudReason && p.cloudVerdict === "rejected" ? <><br /><span className="muted">{p.cloudReason}</span></> : null}
     </div>
   );
 }

@@ -1,0 +1,196 @@
+{
+  "model": "ecg_autoencoder",
+  "version": "ae-onnx-1.0.0",
+  "architecture": "1-D conv autoencoder, 4+4 layers",
+  "parameters": 31137,
+  "onnx_bytes": 127674,
+  "opset": 17,
+  "input": {
+    "name": "ecg",
+    "shape": [
+      null,
+      1,
+      1248
+    ],
+    "sample_rate_hz": 125,
+    "preprocessing": "first 1248 samples of a 10 s single-lead window, per-window z-score"
+  },
+  "score": "mean squared reconstruction error",
+  "thresholds_by_activity": {
+    "rest": {
+      "tau_low": 0.02788006328046322,
+      "tau_high": 0.0482267364859581
+    },
+    "walk": {
+      "tau_low": 0.05553261935710907,
+      "tau_high": 0.08691324293613434
+    },
+    "run": {
+      "tau_low": 0.09376668184995651,
+      "tau_high": 0.14391548931598663
+    }
+  },
+  "training_data": "synthetic healthy windows from edge/simulator (4000 train / 1000 val, independent seeds)",
+  "metrics_test": {
+    "healthy": {
+      "n": 1000,
+      "false_positive_rate": 0.017
+    },
+    "tachycardia": {
+      "n": 500,
+      "recall": 1.0,
+      "roc_auc": 1.0
+    },
+    "bradycardia": {
+      "n": 500,
+      "recall": 0.91,
+      "roc_auc": 0.97172
+    },
+    "arrhythmia": {
+      "n": 500,
+      "recall": 0.99,
+      "roc_auc": 0.922572
+    },
+    "hypoxia": {
+      "n": 500,
+      "recall": 0.71,
+      "roc_auc": 0.749848
+    },
+    "overall": {
+      "precision": 0.9906695938529089,
+      "recall": 0.9025,
+      "f1": 0.944531658817373,
+      "roc_auc": 0.911035
+    }
+  },
+  "onnx_vs_pytorch_max_abs_diff": 2.384185791015625e-06,
+  "cpu_inference_ms": 0.6771148799998628,
+  "history": [
+    {
+      "epoch": 1,
+      "train_mse": 0.5280571938753128,
+      "val_mse": 0.13168005645275116
+    },
+    {
+      "epoch": 2,
+      "train_mse": 0.07701137775182725,
+      "val_mse": 0.05676160007715225
+    },
+    {
+      "epoch": 3,
+      "train_mse": 0.050052432000637054,
+      "val_mse": 0.04470926150679588
+    },
+    {
+      "epoch": 4,
+      "train_mse": 0.04345450991392136,
+      "val_mse": 0.08167029172182083
+    },
+    {
+      "epoch": 5,
+      "train_mse": 0.041638920545578,
+      "val_mse": 0.037291139364242554
+    },
+    {
+      "epoch": 6,
+      "train_mse": 0.03591170361638069,
+      "val_mse": 0.03513896092772484
+    },
+    {
+      "epoch": 7,
+      "train_mse": 0.0344924675822258,
+      "val_mse": 0.03613008186221123
+    },
+    {
+      "epoch": 8,
+      "train_mse": 0.03403374056518078,
+      "val_mse": 0.032814983278512955
+    },
+    {
+      "epoch": 9,
+      "train_mse": 0.03190263107419014,
+      "val_mse": 0.03161676973104477
+    },
+    {
+      "epoch": 10,
+      "train_mse": 0.03133203835785389,
+      "val_mse": 0.030922871083021164
+    },
+    {
+      "epoch": 11,
+      "train_mse": 0.030518141359090804,
+      "val_mse": 0.03049110434949398
+    },
+    {
+      "epoch": 12,
+      "train_mse": 0.029911997944116593,
+      "val_mse": 0.02986687421798706
+    },
+    {
+      "epoch": 13,
+      "train_mse": 0.02938204897940159,
+      "val_mse": 0.029406681656837463
+    },
+    {
+      "epoch": 14,
+      "train_mse": 0.029008513435721396,
+      "val_mse": 0.02901379205286503
+    },
+    {
+      "epoch": 15,
+      "train_mse": 0.028684235215187072,
+      "val_mse": 0.02873004600405693
+    },
+    {
+      "epoch": 16,
+      "train_mse": 0.028397061720490457,
+      "val_mse": 0.02852782793343067
+    },
+    {
+      "epoch": 17,
+      "train_mse": 0.02817882713675499,
+      "val_mse": 0.028268447145819664
+    },
+    {
+      "epoch": 18,
+      "train_mse": 0.027991681918501855,
+      "val_mse": 0.0281238816678524
+    },
+    {
+      "epoch": 19,
+      "train_mse": 0.02785004475712776,
+      "val_mse": 0.027984892949461937
+    },
+    {
+      "epoch": 20,
+      "train_mse": 0.027735141083598137,
+      "val_mse": 0.027869731187820435
+    },
+    {
+      "epoch": 21,
+      "train_mse": 0.02764391966164112,
+      "val_mse": 0.02779768593609333
+    },
+    {
+      "epoch": 22,
+      "train_mse": 0.027584323570132255,
+      "val_mse": 0.027754364535212517
+    },
+    {
+      "epoch": 23,
+      "train_mse": 0.02754397465288639,
+      "val_mse": 0.027719810605049133
+    },
+    {
+      "epoch": 24,
+      "train_mse": 0.02752060416340828,
+      "val_mse": 0.027704304084181786
+    },
+    {
+      "epoch": 25,
+      "train_mse": 0.027509912341833115,
+      "val_mse": 0.02769974246621132
+    }
+  ],
+  "train_seconds": 70.3
+}

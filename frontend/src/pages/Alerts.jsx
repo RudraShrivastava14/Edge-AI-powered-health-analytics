@@ -36,15 +36,16 @@ export default function Alerts({ deviceId, onChange }) {
       <div className="card">
         {items.length === 0 ? <p className="muted">No {status === "all" ? "" : status} alerts.</p> : (
           <table className="tbl">
-            <thead><tr><th>Time</th><th>Device</th><th>Class</th><th>Severity</th><th>HR / SpO₂</th><th>Confidence</th><th>Notified</th><th>End-to-end</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Time</th><th>Device</th><th>Class</th><th>Severity</th><th>HR / SpO₂</th><th>Cloud ML (beats)</th><th>Confidence</th><th>Notified</th><th>End-to-end</th><th>Status</th><th /></tr></thead>
             <tbody>
               {items.map((a) => (
                 <tr key={a.alertId}>
                   <td>{fmtDateTime(a.ts)}</td>
                   <td>{a.deviceId}</td>
-                  <td className="cap">{a.class.replace("_", " ")}</td>
+                  <td className="cap">{a.class.replaceAll("_", " ")}</td>
                   <td><span className={`pill sev-${a.severity}`}>{a.severity}</span></td>
                   <td>{a.hr?.toFixed?.(0)} bpm / {a.spo2?.toFixed?.(1)}%</td>
+                  <td>{a.beats ? <span title={a.cloudModel}>{["V", "S"].filter((k) => a.abnormalBeats?.[k]).map((k) => `${a.abnormalBeats[k]} ${k}`).join(" · ") || "rules"} / {a.beats}</span> : "—"}</td>
                   <td>{a.confidence}</td>
                   <td>{a.notified ? "email sent" : a.notified === false ? "debounced" : "…"}</td>
                   <td>{a.endToEndMs != null ? `${(a.endToEndMs / 1000).toFixed(2)} s` : "—"}</td>

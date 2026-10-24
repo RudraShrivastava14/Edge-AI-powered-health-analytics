@@ -160,13 +160,24 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties: { LogGroupName: !Sub "/aws/lambda/${IngestFunction}", RetentionInDays: 7 }
 
+  MlLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub hh-${Env}-ml-runtime
+      Description: numpy + onnxruntime (arm64, Python 3.12) for the cloud beat classifier
+      ContentUri: ../backend/layers/ml/
+      CompatibleRuntimes: [python3.12]
+      CompatibleArchitectures: [arm64]
+
   AnomalyFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub hh-${Env}-anomaly-processor
       CodeUri: ../backend/lambdas/anomaly_processor/
       Handler: app.handler
-      MemorySize: 512
+      MemorySize: 1024
+      Timeout: 30
+      Layers: [!Ref MlLayer]
       Environment:
         Variables:
           ALERT_FUNCTION: !Sub hh-${Env}-alert-dispatcher

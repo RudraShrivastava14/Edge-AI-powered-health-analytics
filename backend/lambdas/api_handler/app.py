@@ -66,7 +66,8 @@ def _int(qs, name, default, lo, hi):
 
 def _vital_row(i):
     keys = ("ts", "seq", "hr", "hrMin", "hrMax", "sdnn", "spo2", "tempC", "activity", "flag",
-            "reconError", "payloadBytes", "cloudVerdict", "edgeToIngestMs")
+            "reconError", "payloadBytes", "cloudVerdict", "edgeToIngestMs", "modelVersion",
+            "cloudReason", "cloudModel")
     return {k: i.get(k) for k in keys if k in i}
 
 

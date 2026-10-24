@@ -64,3 +64,4 @@ Thumbs.db
 *.swp
 frontend/dist/
 frontend/node_modules/
+backend/layers/
